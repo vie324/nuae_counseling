@@ -1,16 +1,25 @@
 /**
- * Nuae Nail Salon - Counseling Results Viewer
- * Google Apps Script Web App
+ * Nuae Nail Salon - Counseling JSON API (for Vercel frontend)
+ *
+ * このGASは Vercel から呼び出される JSON API として動作します。
+ * フロントエンドは Vercel にホストされ、Vercel Serverless Function 経由で
+ * このGASを叩きます。GAS自体のアクセスは「全員」に設定し、
+ * API_SECRET (スクリプトプロパティ) によるトークン認証で保護します。
  *
  * セットアップ手順:
- * 1. Googleフォームの回答が記録されているスプレッドシートを開く
- * 2. 拡張機能 > Apps Script を選択
- * 3. このプロジェクトのファイルを全てコピー
- * 4. デプロイ > 新しいデプロイ > ウェブアプリ
- * 5. アクセスできるユーザー: 自分のみ（または必要に応じて変更）
+ * 1. Googleフォーム回答が記録されているスプレッドシートを開く
+ * 2. 拡張機能 → Apps Script で本ファイルと appsscript.json を貼り付け
+ * 3. 左メニューの「プロジェクトの設定」→「スクリプトプロパティ」で
+ *    API_SECRET = <十分に長いランダム文字列> を追加
+ * 4. デプロイ → 新しいデプロイ → ウェブアプリ
+ *    - 次のユーザーとして実行: 自分
+ *    - アクセスできるユーザー: 全員
+ *      ※API_SECRETによる保護があるため、URLを知っていてもtokenがないと拒否
+ * 5. 表示されたURLと API_SECRET を Vercel の環境変数に設定
+ *    （README参照）
  */
 
-const SHEET_NAME = ''; // 空にすると最初のシートを自動で使用
+const SHEET_NAME = '';
 
 const NOTICE_ITEMS = [
   {
@@ -48,20 +57,44 @@ const NOTICE_ITEMS = [
   }
 ];
 
-function doGet(e) {
-  return HtmlService.createTemplateFromFile('Index')
-    .evaluate()
-    .setTitle('Nuae - カウンセリング結果')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1.0, maximum-scale=1.0')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+function doGet(e) { return handleRequest(e); }
+function doPost(e) { return handleRequest(e); }
+
+function handleRequest(e) {
+  try {
+    const expected = PropertiesService.getScriptProperties().getProperty('API_SECRET');
+    const provided = (e && e.parameter && e.parameter.token) || '';
+
+    if (!expected) {
+      return jsonResponse({ error: 'API_SECRET is not configured in script properties' });
+    }
+    if (!safeEquals(expected, provided)) {
+      return jsonResponse({ error: 'Unauthorized' });
+    }
+
+    return jsonResponse({
+      customers: getCustomers(),
+      notices: NOTICE_ITEMS,
+      generatedAt: new Date().toISOString()
+    });
+  } catch (err) {
+    return jsonResponse({ error: String((err && err.message) || err) });
+  }
 }
 
-function include(filename) {
-  return HtmlService.createHtmlOutputFromFile(filename).getContent();
+function jsonResponse(data) {
+  return ContentService.createTextOutput(JSON.stringify(data))
+    .setMimeType(ContentService.MimeType.JSON);
 }
 
-function getNoticeItems() {
-  return NOTICE_ITEMS;
+function safeEquals(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  if (a.length !== b.length) return false;
+  let result = 0;
+  for (let i = 0; i < a.length; i++) {
+    result |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return result === 0;
 }
 
 function getSheet() {
@@ -86,18 +119,10 @@ function getCustomers() {
     .reverse();
 }
 
-function getCustomerDetail(rowId) {
-  const sheet = getSheet();
-  const row = sheet.getRange(rowId, 1, 1, 8).getValues()[0];
-  return buildCustomer(row, rowId);
-}
-
 function buildCustomer(row, rowId) {
   return {
     id: rowId,
     timestamp: formatDateTime(row[0]),
-    timestampDate: formatDate(row[0]),
-    timestampTime: formatTime(row[0]),
     name: String(row[1] || '').trim(),
     furigana: String(row[2] || '').trim(),
     address: String(row[3] || '').trim(),
@@ -112,8 +137,7 @@ function buildCustomer(row, rowId) {
 
 function getInitial(name) {
   const str = String(name || '').trim();
-  if (!str) return '？';
-  return str.charAt(0);
+  return str ? str.charAt(0) : '？';
 }
 
 function formatDateTime(date) {
@@ -123,26 +147,6 @@ function formatDateTime(date) {
     return Utilities.formatDate(new Date(date), 'Asia/Tokyo', 'yyyy/MM/dd HH:mm');
   } catch (err) {
     return String(date);
-  }
-}
-
-function formatDate(date) {
-  if (!date) return '';
-  if (typeof date === 'string') return date;
-  try {
-    return Utilities.formatDate(new Date(date), 'Asia/Tokyo', 'yyyy/MM/dd');
-  } catch (err) {
-    return String(date);
-  }
-}
-
-function formatTime(date) {
-  if (!date) return '';
-  if (typeof date === 'string') return '';
-  try {
-    return Utilities.formatDate(new Date(date), 'Asia/Tokyo', 'HH:mm');
-  } catch (err) {
-    return '';
   }
 }
 
@@ -164,9 +168,7 @@ function calculateAge(birthday) {
     const today = new Date();
     let age = today.getFullYear() - birth.getFullYear();
     const m = today.getMonth() - birth.getMonth();
-    if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
-      age--;
-    }
+    if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) age--;
     return age >= 0 && age < 150 ? age : null;
   } catch (err) {
     return null;
