@@ -1,47 +1,109 @@
-# Nuae - カウンセリング結果ビューア
+# Nuae Counseling - カウンセリング結果ビューア
 
-ネイルサロン Nuae のお客様カウンセリング情報（Googleフォーム回答）を、視認性高く・お洒落に表示するための Google Apps Script ウェブアプリです。
+ネイルサロン Nuae のお客様カウンセリング情報（Googleフォーム回答）を、視認性高く・お洒落に表示するためのウェブアプリです。
 
-## 特徴
+- **フロント**: Vercel（静的HTML/CSS/JS + Serverless Functions）
+- **バックエンド**: Google Apps Script (JSON API)
+- **データソース**: Googleフォーム → スプレッドシート
+- **認証**: パスワード + 署名付きCookieセッション
 
-- ブランドカラー (#B08C80) を基調にした上品で動きのあるデザイン
-- お客様一覧をカードビューで表示（自動アニメーション）
-- 詳細モーダルで全情報を確認（ご注意事項6項目をアコーディオン展開）
-- 名前・フリガナ・電話番号・住所による検索機能
-- 電話番号・住所のワンクリックコピー
-- スマホ対応のレスポンシブレイアウト
-- 登録件数・直近30日件数のサマリ表示
+## 構成
 
-## ファイル構成
+```
+[Googleフォーム] → [スプレッドシート]
+                         ↓ (GAS Web App / JSON API)
+                   [Google Apps Script]
+                         ↓ token認証付きで呼び出し
+                  [Vercel /api/customers] ← Cookie認証
+                         ↓
+                   [Vercel /index.html] ← 静的フロント
+                         ↓
+                   [スタッフのブラウザ]
+```
 
-| ファイル | 役割 |
-| --- | --- |
-| `Code.gs` | サーバーサイド (スプレッドシート読み取り、整形、ウェブアプリ配信) |
-| `Index.html` | メインHTML (ヘッダー、ヒーロー、一覧、モーダル) |
-| `Stylesheet.html` | CSS (`<?!= include() ?>` で読み込み) |
-| `JavaScript.html` | クライアントサイド JS (検索、レンダリング、モーダル) |
-| `appsscript.json` | GAS マニフェスト (タイムゾーン Asia/Tokyo, V8) |
+## ディレクトリ
 
-## セットアップ手順
+```
+.
+├── public/                # Vercel静的フロント (outputDirectory)
+│   ├── index.html         # ログイン + メインUI
+│   ├── styles.css
+│   └── app.js
+├── api/                   # Vercel Serverless Functions
+│   ├── _lib/
+│   │   ├── auth.js        # Cookie署名・検証
+│   │   └── gas.js         # GAS API呼び出し
+│   ├── login.js           # POST /api/login
+│   ├── logout.js          # POST /api/logout
+│   └── customers.js       # GET /api/customers
+├── gas/                   # Google Apps Script ソース（手動でGAS側に貼り付け）
+│   ├── Code.gs
+│   └── appsscript.json
+├── package.json
+├── vercel.json
+├── .env.example           # 環境変数テンプレート
+└── .gitignore
+```
 
-1. Google フォームの回答が記録されているスプレッドシートを開く
-2. メニューから **拡張機能 → Apps Script** を選択
-3. 表示されたスクリプトエディタで、以下のファイルを作成し本リポジトリの内容を貼り付け
-   - `Code.gs` (デフォルトの `コード.gs` を置き換え)
-   - `Index.html` (ファイル → 新規作成 → HTML)
-   - `Stylesheet.html` (HTML)
-   - `JavaScript.html` (HTML)
-   - `appsscript.json` (左メニューの「プロジェクトの設定」から「マニフェストファイルをエディタで表示する」をオンにすると編集可能)
-4. **デプロイ → 新しいデプロイ → 種類: ウェブアプリ** を選択
-5. 設定:
-   - 説明: 任意
+## セットアップ
+
+### 1. GAS側
+
+1. Googleフォーム回答が記録されているスプレッドシートを開く
+2. 拡張機能 → Apps Script
+3. `gas/Code.gs` の内容を `コード.gs` にコピー
+4. `gas/appsscript.json` の内容を「プロジェクトの設定 → 『マニフェストファイルをエディタで表示する』」にコピー
+5. プロジェクトの設定 → スクリプトプロパティ で以下を追加:
+   - `API_SECRET` = 任意の長いランダム文字列（後でVercel側に同じ値を設定）
+6. デプロイ → 新しいデプロイ → ウェブアプリ
    - 次のユーザーとして実行: **自分**
-   - アクセスできるユーザー: **自分のみ**（または運用ポリシーに合わせて変更）
-6. **デプロイ** をクリックし、表示された URL をブックマーク
+   - アクセスできるユーザー: **全員**
+     ※`API_SECRET` トークン認証で保護されているため、URLを知っていてもtokenがないと拒否される
+7. 表示されたURL（末尾 `/exec`）をメモ
+
+### 2. Vercel側
+
+1. このリポジトリをGitHubにpushしてVercelに接続
+2. Project Settings → Environment Variables に以下を登録（Production / Preview / Development全てに適用）:
+
+   | 変数 | 値 |
+   | --- | --- |
+   | `APP_PASSWORD` | スタッフ用ログインパスワード |
+   | `SESSION_SECRET` | Cookie署名用のランダム文字列（64文字以上推奨）<br>`openssl rand -hex 32` で生成 |
+   | `GAS_URL` | 上記GASのデプロイURL（末尾 `/exec`） |
+   | `GAS_API_TOKEN` | GASに設定した `API_SECRET` と同じ値 |
+
+3. デプロイ完了後、表示されたURLにアクセス → パスワード入力でログイン
+
+### 3. ローカル開発（任意）
+
+```bash
+npm i -g vercel
+vercel link        # 既存プロジェクトと紐付け
+vercel env pull    # 環境変数を .env.local にダウンロード
+vercel dev         # http://localhost:3000 で起動
+```
+
+## 環境変数
+
+| 変数 | 必須 | 用途 |
+| --- | :---: | --- |
+| `APP_PASSWORD` | ✓ | フロントログイン時のパスワード |
+| `SESSION_SECRET` | ✓ | 認証Cookieの署名鍵（最低16文字、推奨64文字） |
+| `GAS_URL` | ✓ | GAS Web AppのデプロイURL |
+| `GAS_API_TOKEN` | ✓ | GAS側の `API_SECRET` と一致させる |
+
+## API
+
+| メソッド | パス | 用途 |
+| --- | --- | --- |
+| `POST` | `/api/login` | パスワード検証、認証Cookie発行 |
+| `POST` | `/api/logout` | 認証Cookie削除 |
+| `GET` | `/api/customers` | お客様一覧 + 注意事項取得（要Cookie認証） |
 
 ## スプレッドシートの想定列順
 
-A 〜 H 列の順序がフォームの初期出力と一致している必要があります:
+A 〜 H 列の順序がフォームの初期出力と一致している必要があります。
 
 | 列 | 内容 |
 | --- | --- |
@@ -54,10 +116,15 @@ A 〜 H 列の順序がフォームの初期出力と一致している必要が
 | G | SNS掲載のご協力 |
 | H | ご注意事項の確認 |
 
-`Code.gs` の冒頭にある `SHEET_NAME` を空のままにしておくと、スプレッドシートの最初のシートを自動的に参照します。シート名を固定したい場合は `SHEET_NAME = 'フォームの回答 1'` のように設定してください。
+## カスタマイズ
 
-## カスタマイズのヒント
+- ブランドカラーは `public/styles.css` 冒頭の CSS変数 (`--color-primary` 等) で一括変更可能
+- 注意事項の文言は `gas/Code.gs` の `NOTICE_ITEMS` 配列を編集
+- 列順を変更したい場合は `gas/Code.gs` の `buildCustomer()` のインデックスを調整
 
-- ブランドカラーは `Stylesheet.html` 冒頭の CSS 変数 (`--color-primary` 等) で一括変更可能
-- ご注意事項の文言は `Code.gs` の `NOTICE_ITEMS` 配列を編集することで変更できます
-- 列順を変更したい場合は `Code.gs` の `buildCustomer()` のインデックスを調整してください
+## セキュリティ
+
+- フロントはパスワード + 署名付きHttpOnly Cookieで保護
+- GAS APIは独立トークン認証（`API_SECRET`）で保護、URLを知られても突破されない
+- すべてのシークレットはVercel環境変数で管理、リポジトリには含めない
+- Cookie有効期限は12時間（変更は `api/_lib/auth.js` の `TTL_HOURS`）

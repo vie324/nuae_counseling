@@ -1,0 +1,9 @@
+{
+  "name": "nuae-counseling",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Nuae nail salon counseling records viewer (Vercel)",
+  "engines": {
+    "node": ">=18"
+  }
+}

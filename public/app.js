@@ -1,4 +1,3 @@
-<script>
 (function() {
   'use strict';
 
@@ -6,34 +5,79 @@
   let noticeItems = [];
   let filteredCustomers = [];
 
-  const els = {
-    grid: document.getElementById('customerGrid'),
-    loading: document.getElementById('loadingState'),
-    empty: document.getElementById('emptyState'),
-    search: document.getElementById('searchInput'),
-    refresh: document.getElementById('refreshBtn'),
-    totalCount: document.getElementById('totalCount'),
-    recentCount: document.getElementById('recentCount'),
-    visibleCount: document.getElementById('visibleCount'),
-    modal: document.getElementById('detailModal'),
-    modalContent: document.getElementById('modalContent'),
-    modalClose: document.getElementById('modalClose'),
-    backdrop: document.querySelector('.modal-backdrop')
-  };
+  const els = {};
 
   function init() {
-    loadAll();
-    bindEvents();
+    cacheEls();
+    bindLogin();
+    bootstrap();
   }
 
-  function bindEvents() {
+  function cacheEls() {
+    els.loginScreen = document.getElementById('loginScreen');
+    els.loginForm = document.getElementById('loginForm');
+    els.loginPassword = document.getElementById('loginPassword');
+    els.loginBtn = document.getElementById('loginBtn');
+    els.loginError = document.getElementById('loginError');
+    els.appShell = document.getElementById('appShell');
+    els.grid = document.getElementById('customerGrid');
+    els.loading = document.getElementById('loadingState');
+    els.empty = document.getElementById('emptyState');
+    els.search = document.getElementById('searchInput');
+    els.refresh = document.getElementById('refreshBtn');
+    els.logout = document.getElementById('logoutBtn');
+    els.totalCount = document.getElementById('totalCount');
+    els.recentCount = document.getElementById('recentCount');
+    els.visibleCount = document.getElementById('visibleCount');
+    els.modal = document.getElementById('detailModal');
+    els.modalContent = document.getElementById('modalContent');
+    els.modalClose = document.getElementById('modalClose');
+    els.backdrop = document.querySelector('.modal-backdrop');
+  }
+
+  function bindLogin() {
+    els.loginForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      els.loginError.textContent = '';
+      const password = els.loginPassword.value;
+      if (!password) {
+        els.loginError.textContent = 'パスワードを入力してください';
+        return;
+      }
+      els.loginBtn.disabled = true;
+      try {
+        const res = await fetch('/api/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password })
+        });
+        if (!res.ok) {
+          const data = await res.json().catch(() => ({}));
+          els.loginError.textContent = data.error || 'ログインに失敗しました';
+          els.loginPassword.select();
+          return;
+        }
+        await enterApp();
+      } catch (err) {
+        els.loginError.textContent = '通信エラー: ' + err.message;
+      } finally {
+        els.loginBtn.disabled = false;
+      }
+    });
+  }
+
+  function bindAppEvents() {
+    if (bindAppEvents._bound) return;
+    bindAppEvents._bound = true;
+
     els.search.addEventListener('input', debounce(handleSearch, 180));
     els.refresh.addEventListener('click', () => {
       els.refresh.style.pointerEvents = 'none';
-      loadAll().finally(() => {
+      loadData().finally(() => {
         setTimeout(() => { els.refresh.style.pointerEvents = ''; }, 600);
       });
     });
+    els.logout.addEventListener('click', handleLogout);
     els.modalClose.addEventListener('click', closeModal);
     els.backdrop.addEventListener('click', closeModal);
     document.addEventListener('keydown', (e) => {
@@ -41,34 +85,89 @@
     });
   }
 
-  function loadAll() {
+  async function bootstrap() {
+    const ok = await tryLoadData();
+    if (ok) {
+      showApp();
+    } else {
+      showLogin();
+    }
+  }
+
+  async function enterApp() {
+    showApp();
+    await loadData();
+  }
+
+  function showLogin() {
+    els.appShell.classList.add('hidden');
+    els.loginScreen.classList.remove('hidden');
+    setTimeout(() => els.loginPassword.focus(), 100);
+  }
+
+  function showApp() {
+    els.loginScreen.classList.add('hidden');
+    els.appShell.classList.remove('hidden');
+    bindAppEvents();
+  }
+
+  async function tryLoadData() {
+    try {
+      const res = await fetch('/api/customers', { credentials: 'same-origin' });
+      if (res.status === 401) return false;
+      if (!res.ok) {
+        showError(`データ取得に失敗しました (HTTP ${res.status})`);
+        return true;
+      }
+      const data = await res.json();
+      applyData(data);
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  async function loadData() {
     els.loading.classList.remove('hidden');
     els.empty.classList.add('hidden');
     els.grid.innerHTML = '';
 
-    return Promise.all([
-      runScript('getCustomers'),
-      runScript('getNoticeItems')
-    ]).then(([customers, notices]) => {
-      allCustomers = customers || [];
-      noticeItems = notices || [];
-      filteredCustomers = allCustomers.slice();
-      updateStats();
-      render();
-    }).catch((err) => {
-      console.error(err);
-      els.loading.classList.add('hidden');
-      showError('データの読み込みに失敗しました: ' + (err && err.message ? err.message : err));
-    });
+    try {
+      const res = await fetch('/api/customers', { credentials: 'same-origin' });
+      if (res.status === 401) {
+        showLogin();
+        return;
+      }
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        showError(data.error || `データ取得に失敗しました (HTTP ${res.status})`);
+        return;
+      }
+      const data = await res.json();
+      applyData(data);
+    } catch (err) {
+      showError('通信エラー: ' + err.message);
+    }
   }
 
-  function runScript(name, ...args) {
-    return new Promise((resolve, reject) => {
-      google.script.run
-        .withSuccessHandler(resolve)
-        .withFailureHandler(reject)
-        [name](...args);
-    });
+  function applyData(data) {
+    allCustomers = (data && data.customers) || [];
+    noticeItems = (data && data.notices) || [];
+    filteredCustomers = allCustomers.slice();
+    updateStats();
+    render();
+  }
+
+  async function handleLogout() {
+    try {
+      await fetch('/api/logout', { method: 'POST', credentials: 'same-origin' });
+    } catch (err) {}
+    allCustomers = [];
+    noticeItems = [];
+    filteredCustomers = [];
+    els.loginPassword.value = '';
+    els.loginError.textContent = '';
+    showLogin();
   }
 
   function handleSearch() {
@@ -116,9 +215,7 @@
     els.visibleCount.textContent = filteredCustomers.length + '件';
 
     const frag = document.createDocumentFragment();
-    filteredCustomers.forEach((c, i) => {
-      frag.appendChild(buildCard(c, i));
-    });
+    filteredCustomers.forEach((c, i) => frag.appendChild(buildCard(c, i)));
     els.grid.appendChild(frag);
   }
 
@@ -173,10 +270,7 @@
       head.addEventListener('click', () => head.parentElement.classList.toggle('is-open'));
     });
     els.modalContent.querySelectorAll('.copyable').forEach(el => {
-      el.addEventListener('click', () => {
-        const text = el.dataset.copy;
-        copyToClipboard(text);
-      });
+      el.addEventListener('click', () => copyToClipboard(el.dataset.copy));
     });
   }
 
@@ -184,7 +278,7 @@
     const snsConsent = c.snsConsent || '';
     const isYes = /はい|yes|可|協力|OK|ok/.test(snsConsent);
     const isNo = /いいえ|no|不可|遠慮|難しい/.test(snsConsent);
-    const consentClass = isYes ? 'consent-yes' : (isNo ? 'consent-no' : 'consent-no');
+    const consentClass = isYes ? 'consent-yes' : 'consent-no';
     const consentText = snsConsent || '未回答';
 
     const noticesHtml = noticeItems.map((n, i) => {
@@ -203,9 +297,7 @@
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg>
             </div>
           </div>
-          <div class="notice-body">
-            ${body.join('')}
-          </div>
+          <div class="notice-body">${body.join('')}</div>
         </div>`;
     }).join('');
 
@@ -266,9 +358,7 @@
             <strong>ご確認済み</strong> ／ ${escapeHtml(c.notesConfirmed)}
           </div>
         </div>` : ''}
-        <div class="notice-list">
-          ${noticesHtml}
-        </div>
+        <div class="notice-list">${noticesHtml}</div>
       </div>
     `;
   }
@@ -308,6 +398,7 @@
   }
 
   function showError(msg) {
+    els.loading.classList.add('hidden');
     els.empty.classList.remove('hidden');
     els.empty.querySelector('.empty-title').textContent = 'エラーが発生しました';
     els.empty.querySelector('.empty-desc').textContent = msg;
@@ -323,9 +414,7 @@
       .replace(/'/g, '&#39;');
   }
 
-  function escapeAttr(s) {
-    return escapeHtml(s);
-  }
+  function escapeAttr(s) { return escapeHtml(s); }
 
   function debounce(fn, wait) {
     let timer;
@@ -341,4 +430,3 @@
     init();
   }
 })();
-</script>
