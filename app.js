@@ -36,34 +36,46 @@
   }
 
   function bindLogin() {
-    els.loginForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
+    const submitLogin = async (e) => {
+      if (e && e.preventDefault) e.preventDefault();
+      if (e && e.stopPropagation) e.stopPropagation();
+      console.log('[login] handler fired, event=%s', e && e.type);
+
       els.loginError.textContent = '';
       const password = els.loginPassword.value;
       if (!password) {
         els.loginError.textContent = 'パスワードを入力してください';
-        return;
+        return false;
       }
       els.loginBtn.disabled = true;
       try {
+        console.log('[login] sending POST /api/login');
         const res = await fetch('/api/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'same-origin',
+          cache: 'no-store',
           body: JSON.stringify({ password })
         });
+        console.log('[login] response status=%s', res.status);
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           els.loginError.textContent = data.error || 'ログインに失敗しました';
           els.loginPassword.select();
-          return;
+          return false;
         }
         await enterApp();
       } catch (err) {
+        console.error('[login] fetch error:', err);
         els.loginError.textContent = '通信エラー: ' + err.message;
       } finally {
         els.loginBtn.disabled = false;
       }
-    });
+      return false;
+    };
+
+    els.loginForm.addEventListener('submit', submitLogin);
+    els.loginBtn.addEventListener('click', submitLogin);
   }
 
   function bindAppEvents() {
