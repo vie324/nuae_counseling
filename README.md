@@ -25,10 +25,9 @@
 
 ```
 .
-├── public/                # Vercel静的フロント (outputDirectory)
-│   ├── index.html         # ログイン + メインUI
-│   ├── styles.css
-│   └── app.js
+├── index.html             # ログイン + メインUI（Vercelがルートで配信）
+├── styles.css
+├── app.js
 ├── api/                   # Vercel Serverless Functions
 │   ├── _lib/
 │   │   ├── auth.js        # Cookie署名・検証
@@ -41,6 +40,7 @@
 │   └── appsscript.json
 ├── package.json
 ├── vercel.json
+├── .vercelignore          # Vercel配信対象から除外（gas/ など）
 ├── .env.example           # 環境変数テンプレート
 └── .gitignore
 ```
